@@ -12,10 +12,17 @@ function parseTopThirty(html: string) {
   const riders: { position:number; key:string; name:string }[] = [];
   for (const row of rows) {
     const body = row[1];
-    const rider = body.match(/href=["']\/rider\/([^"'?/#]+)[^"']*["'][^>]*>([\s\S]*?)<\/a>/i);
+    // PCS presents surname and first name as separate links with the same rider URL.
+    // Accept absolute and relative URLs because their server markup varies by client.
+    const riderLinks = [...body.matchAll(/href=["'](?:https?:\/\/[^"']+)?\/?rider\/([^"'?/#]+)[^"']*["'][^>]*>([\s\S]*?)<\/a>/gi)];
+    const rider = riderLinks[0];
     const cells = [...body.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/gi)].map(x => decode(x[1]));
-    const position = Number(cells.find(x => /^\d{1,2}$/.test(x)));
-    if (rider && position >= 1 && position <= 30) { const name = decode(rider[2]); riders.push({ position, key: riderKey(name), name }); }
+    const rankCell = cells.find(x => /^\d{1,2}\.?$/.test(x));
+    const position = Number(rankCell?.replace('.', ''));
+    if (rider && position >= 1 && position <= 30) {
+      const name = riderLinks.filter(link => link[1] === rider[1]).map(link => decode(link[2])).filter(Boolean).join(' ');
+      if (name) riders.push({ position, key: riderKey(name), name });
+    }
   }
   return riders.filter((r, i, all) => all.findIndex(x => x.position === r.position) === i).sort((a,b) => a.position-b.position).slice(0,30);
 }
