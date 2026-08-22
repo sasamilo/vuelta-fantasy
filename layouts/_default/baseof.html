@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="La Vuelta cycling fantasy leaderboard">
+    <title>{{ if .IsHome }}{{ site.Title }}{{ else }}{{ .Title }} · {{ site.Title }}{{ end }}</title>
+    {{ $css := resources.Get "css/main.css" | minify | fingerprint }}
+    <link rel="stylesheet" href="{{ $css.RelPermalink }}" integrity="{{ $css.Data.Integrity }}">
+    <script src="/config.js" defer></script>
+    {{ $js := resources.Get "js/app.js" | minify | fingerprint }}
+    <script src="{{ $js.RelPermalink }}" integrity="{{ $js.Data.Integrity }}" defer></script>
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="/">VUELTA <span>FANTASY</span></a>
+      <nav aria-label="Primary"><a href="#leaderboard">Leaderboard</a><a href="#daily">Daily scores</a><a href="#picks">Predictions</a></nav>
+    </header>
+    <main>{{ block "main" . }}{{ end }}</main>
+    <footer>Official results: <a href="https://www.procyclingstats.com/" rel="noopener">ProCyclingStats</a> · Updated automatically after each stage</footer>
+  </body>
+</html>

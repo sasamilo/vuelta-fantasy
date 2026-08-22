@@ -1,0 +1,14 @@
+baseURL = "https://example.org/"
+languageCode = "en"
+title = "Vuelta Fantasy"
+disableKinds = ["taxonomy", "term"]
+
+[params]
+  raceName = "La Vuelta Fantasy 2026"
+  season = "2026"
+  sourceName = "ProCyclingStats"
+
+[markup]
+  [markup.goldmark]
+    [markup.goldmark.renderer]
+      unsafe = true

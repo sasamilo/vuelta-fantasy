@@ -1,0 +1,28 @@
+{{ define "main" }}
+<section class="hero">
+  <p class="eyebrow">{{ site.Params.season }} · Five riders. Every stage.</p>
+  <h1>{{ site.Params.raceName }}</h1>
+  <div class="intro">{{ .Content }}</div>
+  <a class="button" data-form-link href="#" hidden>Make your picks</a>
+</section>
+
+<section class="latest" aria-labelledby="latest-title">
+  <div><p class="eyebrow">Latest result</p><h2 id="latest-title" data-latest-title>Waiting for results</h2><p data-latest-meta>Results will appear here after the first official stage classification.</p></div>
+  <a data-latest-link class="text-link" href="#" hidden>View official result ↗</a>
+</section>
+
+<section id="leaderboard" class="panel">
+  <div class="section-heading"><div><p class="eyebrow">Overall</p><h2>Cumulative leaderboard</h2></div><span data-stage-count class="pill">— stages scored</span></div>
+  <div class="table-wrap"><table><thead><tr><th>Rank</th><th>Player</th><th class="number">Points</th><th class="number">Stages</th></tr></thead><tbody data-leaderboard><tr><td colspan="4" class="empty">Loading standings…</td></tr></tbody></table></div>
+</section>
+
+<section id="daily" class="panel">
+  <div class="section-heading"><div><p class="eyebrow">Latest stage</p><h2>Daily scores</h2></div></div>
+  <div class="table-wrap"><table><thead><tr><th>Rank</th><th>Player</th><th>Scoring riders</th><th class="number">Points</th></tr></thead><tbody data-daily><tr><td colspan="4" class="empty">No completed stage yet.</td></tr></tbody></table></div>
+</section>
+
+<section id="picks" class="panel">
+  <div class="section-heading"><div><p class="eyebrow">Latest stage</p><h2>Participant predictions</h2></div><span data-picks-stage></span></div>
+  <div class="picks-grid" data-predictions><p class="empty">No predictions are available yet.</p></div>
+</section>
+{{ end }}
