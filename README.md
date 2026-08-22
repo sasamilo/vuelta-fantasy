@@ -52,3 +52,4 @@ To automate, schedule the same request after each stage’s official classificat
 ```sh
 hugo server -D
 ```
+# vuelta-fantasy
