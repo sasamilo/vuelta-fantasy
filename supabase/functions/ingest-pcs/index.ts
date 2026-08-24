@@ -3,34 +3,26 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 const POINTS = [
   100, 80, 60, 50, 45, 40, 36, 32, 29, 26,
   24, 22, 20, 18, 16, 15, 14, 13, 12, 11,
-  10, 9, 8, 7, 6, 5, 4, 3, 2, 1
+  10, 9, 8, 7, 6, 5, 4, 3, 2, 1,
 ];
 
 const cors = {
   "content-type": "application/json",
 };
 
-// PCS does not provide a public results API.
-//
-// This importer only accepts a COMPLETE official top-30
-// classification.
-//
-// IMPORTANT:
-// - The first <td> in a PCS result row is the result/rank.
-// - A numeric value (1, 2, 3...) means a finishing position.
-// - Values such as NR, DNF, DNS, DSQ, OTL, etc. are NOT
-//   finishing positions.
-// - Bib numbers and other numeric cells later in the row
-//   must NEVER be interpreted as finishing positions.
-//
-// If PCS has no complete official top-30 classification,
-// nothing is written to the database.
+function json(data: unknown, status = 200) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: cors,
+  });
+}
 
 function decode(value: string) {
   return value
     .replace(/&amp;/g, "&")
     .replace(/&#39;/g, "'")
     .replace(/&quot;/g, '"')
+    .replace(/&#x27;/gi, "'")
     .replace(/<[^>]*>/g, "")
     .replace(/\s+/g, " ")
     .trim();
@@ -45,9 +37,87 @@ function riderKey(value: string) {
     .replace(/^-|-$/g, "");
 }
 
+/**
+ * Detect pages that are NOT the PCS results page.
+ *
+ * In particular, Cloudflare may return HTTP 200 with a
+ * "Just a moment..." challenge. HTTP status alone is therefore
+ * not sufficient to determine whether the page is usable.
+ */
+function isBlockedOrChallenge(html: string) {
+  const lower = html.toLowerCase();
+
+  return (
+    lower.includes("<title>just a moment...</title>") ||
+    lower.includes("challenge-platform") ||
+    lower.includes("enable javascript and cookies to continue") ||
+    lower.includes("cf-chl-") ||
+    lower.includes("cloudflare")
+  );
+}
+
+/**
+ * Make sure this actually looks like a PCS results page
+ * before attempting to parse it.
+ */
+function looksLikePcsResultsPage(html: string) {
+  const lower = html.toLowerCase();
+
+  return (
+    lower.includes("procyclingstats") &&
+    lower.includes("rnk") &&
+    lower.includes("rider")
+  );
+}
+
+/**
+ * Extract a rider's name from PCS rider links.
+ *
+ * PCS commonly represents surname and first name as separate
+ * links pointing to the same rider URL.
+ */
+function extractRiderName(body: string) {
+  const riderLinks = [
+    ...body.matchAll(
+      /href=["'](?:https?:\/\/[^"']+)?\/?rider\/([^"'?/#]+)[^"']*["'][^>]*>([\s\S]*?)<\/a>/gi
+    ),
+  ];
+
+  if (riderLinks.length === 0) {
+    return null;
+  }
+
+  const riderId = riderLinks[0][1];
+
+  const parts = riderLinks
+    .filter((link) => link[1] === riderId)
+    .map((link) => decode(link[2]))
+    .filter(Boolean);
+
+  if (parts.length === 0) {
+    return null;
+  }
+
+  return parts.join(" ");
+}
+
+/**
+ * Parse only rows whose FIRST table cell is an actual numeric rank.
+ *
+ * IMPORTANT:
+ * This function deliberately does NOT accept:
+ * NR
+ * DNF
+ * DNS
+ * DSQ
+ * etc.
+ *
+ * It also does not treat arbitrary numeric cells such as BIB,
+ * age, UCI points, etc. as finishing positions.
+ */
 function parseTopThirty(html: string) {
   const rows = [
-    ...html.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/gi)
+    ...html.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/gi),
   ];
 
   const riders: {
@@ -59,64 +129,33 @@ function parseTopThirty(html: string) {
   for (const row of rows) {
     const body = row[1];
 
-    // Extract table cells in their original order.
     const cells = [
-      ...body.matchAll(
-        /<td[^>]*>([\s\S]*?)<\/td>/gi
-      ),
-    ].map((x) => decode(x[1]));
+      ...body.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/gi),
+    ].map((match) => decode(match[1]));
 
-    // A valid PCS result row must have a first cell.
     if (cells.length === 0) {
       continue;
     }
 
-    // IMPORTANT:
-    //
-    // PCS result columns start with the result/rank column.
-    //
-    // Example of a normal stage:
-    // 1 | ... | BIB | ... | Rider
-    // 2 | ... | BIB | ... | Rider
-    //
-    // Example of a cancelled/no-result stage:
-    // NR | ... | BIB | ... | Rider
-    //
-    // DNF, DNS, NR, DSQ, OTL, etc. are therefore rejected
-    // automatically because they are not numeric.
-    const rankCell = cells[0].trim();
+    /*
+     * On a PCS results table the Rnk column is the first
+     * data column. Only accept a plain integer 1–30 here.
+     */
+    const rankText = cells[0]
+      .replace(/\./g, "")
+      .trim();
 
-    if (!/^\d{1,2}$/.test(rankCell)) {
+    if (!/^\d+$/.test(rankText)) {
       continue;
     }
 
-    const position = Number(rankCell);
+    const position = Number(rankText);
 
     if (position < 1 || position > 30) {
       continue;
     }
 
-    // Find the rider link.
-    //
-    // PCS presents the rider's surname and first name as
-    // separate links using the same rider URL.
-    const riderLinks = [
-      ...body.matchAll(
-        /href=["'](?:https?:\/\/[^"']+)?\/?rider\/([^"'?/#]+)[^"']*["'][^>]*>([\s\S]*?)<\/a>/gi
-      ),
-    ];
-
-    if (riderLinks.length === 0) {
-      continue;
-    }
-
-    const rider = riderLinks[0];
-
-    const name = riderLinks
-      .filter((link) => link[1] === rider[1])
-      .map((link) => decode(link[2]))
-      .filter(Boolean)
-      .join(" ");
+    const name = extractRiderName(body);
 
     if (!name) {
       continue;
@@ -129,36 +168,43 @@ function parseTopThirty(html: string) {
     });
   }
 
-  // Remove duplicate positions.
-  //
-  // This is important because the PCS HTML can contain
-  // multiple representations of the same row.
-  return riders
+  /*
+   * There can be multiple tables on a PCS page.
+   *
+   * Keep only one rider per position.
+   */
+  const unique = riders
     .filter(
-      (r, i, all) =>
+      (r, index, all) =>
         all.findIndex(
           (x) => x.position === r.position
-        ) === i
+        ) === index
     )
-    .sort((a, b) => a.position - b.position)
-    .slice(0, 30);
+    .sort((a, b) => a.position - b.position);
+
+  return unique;
 }
 
+/**
+ * Absolutely require a complete 1–30 classification.
+ */
 function isCompleteTopThirty(
   riders: {
     position: number;
     key: string;
     name: string;
-  }[]
+  }[],
 ) {
-  // We require EXACTLY 30 riders.
   if (riders.length !== 30) {
     return false;
   }
 
-  // We require positions 1 through 30 with no gaps.
   for (let i = 0; i < 30; i++) {
     if (riders[i].position !== i + 1) {
+      return false;
+    }
+
+    if (!riders[i].key || !riders[i].name) {
       return false;
     }
   }
@@ -168,57 +214,37 @@ function isCompleteTopThirty(
 
 Deno.serve(async (req) => {
   try {
-    // Only POST requests are accepted.
     if (req.method !== "POST") {
-      return new Response(
-        JSON.stringify({
-          error: "POST required"
-        }),
-        {
-          status: 405,
-          headers: cors
-        }
+      return json(
+        { error: "POST required" },
+        405,
       );
     }
-
-    // Protect the importer with the server-side secret.
-    const suppliedSecret =
-      req.headers.get("x-ingest-secret");
 
     const ingestSecret =
       Deno.env.get("INGEST_SECRET");
 
     if (
       !ingestSecret ||
-      suppliedSecret !== ingestSecret
+      req.headers.get("x-ingest-secret") !== ingestSecret
     ) {
-      return new Response(
-        JSON.stringify({
-          error: "unauthorized"
-        }),
-        {
-          status: 401,
-          headers: cors
-        }
+      return json(
+        { error: "unauthorized" },
+        401,
       );
     }
 
-    const { stage } = await req.json();
+    const body = await req.json();
+    const stage = body?.stage;
 
-    // Only Vuelta stages 1–21 are valid.
     if (
       !Number.isInteger(stage) ||
       stage < 1 ||
       stage > 21
     ) {
-      return new Response(
-        JSON.stringify({
-          error: "stage must be 1–21"
-        }),
-        {
-          status: 400,
-          headers: cors
-        }
+      return json(
+        { error: "stage must be 1–21" },
+        400,
       );
     }
 
@@ -228,162 +254,170 @@ Deno.serve(async (req) => {
     const response = await fetch(url, {
       headers: {
         "user-agent":
-          "VueltaFantasy results importer/1.0"
-      }
+          "VueltaFantasy results importer/1.0",
+        "accept":
+          "text/html,application/xhtml+xml",
+      },
     });
 
     if (!response.ok) {
-      return new Response(
-        JSON.stringify({
+      return json(
+        {
           stage,
           imported: false,
           status: "pcs_error",
-          reason:
-            `PCS returned ${response.status}`
-        }),
-        {
-          status: 502,
-          headers: cors
-        }
+          reason: `PCS returned HTTP ${response.status}`,
+        },
+        502,
       );
     }
 
     const html = await response.text();
 
-    const riders = parseTopThirty(html);
-
-    // ---------------------------------------------------------
-    // CRITICAL SAFETY CHECK
-    // ---------------------------------------------------------
-    //
-    // If PCS shows:
-    // - NR
-    // - DNF
-    // - DNS
-    // - DSQ
-    // - OTL
-    // - cancelled stage
-    // - partial classification
-    // - malformed data
-    //
-    // then riders will NOT contain a complete 1–30 result.
-    //
-    // In that situation we return WITHOUT touching Supabase.
-    // ---------------------------------------------------------
-
-    if (!isCompleteTopThirty(riders)) {
-      return new Response(
-        JSON.stringify({
-          stage,
-          imported: false,
-          status: "pending",
-          reason:
-            "No complete official top-30 classification found",
-          riders_found: riders.length
-        }),
-        {
-          status: 200,
-          headers: cors
-        }
+    /*
+     * CRITICAL SAFETY CHECK:
+     *
+     * Cloudflare challenges can return HTTP 200.
+     * Therefore response.ok is NOT enough.
+     */
+    if (isBlockedOrChallenge(html)) {
+      console.error(
+        `PCS returned a Cloudflare challenge for stage ${stage}`,
       );
+
+      return json({
+        stage,
+        imported: false,
+        status: "pcs_blocked",
+        reason:
+          "PCS returned a Cloudflare challenge; no data was imported",
+      });
     }
 
-    // Only create the database client after we have
-    // confirmed a complete official top-30.
+    /*
+     * Don't attempt to parse arbitrary HTML.
+     */
+    if (!looksLikePcsResultsPage(html)) {
+      console.error(
+        `Response for stage ${stage} does not look like a PCS results page`,
+      );
+
+      return json({
+        stage,
+        imported: false,
+        status: "invalid_pcs_page",
+        reason:
+          "Response did not contain the expected PCS results page",
+      });
+    }
+
+    const riders = parseTopThirty(html);
+
+    /*
+     * FAIL CLOSED.
+     *
+     * Nothing is written unless we have exactly:
+     *
+     * 1, 2, 3 ... 30
+     */
+    if (!isCompleteTopThirty(riders)) {
+      console.error(
+        `Incomplete classification for stage ${stage}: ${riders.length} riders`,
+      );
+
+      return json({
+        stage,
+        imported: false,
+        status: "pending",
+        reason:
+          "No complete official top-30 classification found",
+        riders_found: riders.length,
+      });
+    }
+
+    /*
+     * Only now do we create the database client.
+     *
+     * No database writes happen before all validation
+     * checks above have passed.
+     */
     const db = createClient(
       Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get(
-        "SUPABASE_SERVICE_ROLE_KEY"
-      )!
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
     );
 
-    // Mark the stage as published.
-    const {
-      data: stageRow,
-      error: stageError
-    } = await db
-      .from("stages")
-      .upsert(
-        {
-          stage_number: stage,
-          pcs_url: url,
-          status: "published",
-          imported_at:
-            new Date().toISOString()
-        },
-        {
-          onConflict: "stage_number"
-        }
-      )
-      .select("id")
-      .single();
+    const { data: stageRow, error: stageError } =
+      await db
+        .from("stages")
+        .upsert(
+          {
+            stage_number: stage,
+            pcs_url: url,
+            status: "published",
+            imported_at:
+              new Date().toISOString(),
+          },
+          {
+            onConflict: "stage_number",
+          },
+        )
+        .select("id")
+        .single();
 
     if (stageError) {
       throw stageError;
     }
 
-    // Only delete previous results AFTER a complete
-    // official classification has been confirmed.
-    //
-    // This means a cancelled or unfinished stage can
-    // NEVER accidentally delete valid existing data.
-    const {
-      error: clearError
-    } = await db
-      .from("stage_results")
-      .delete()
-      .eq("stage_id", stageRow.id);
+    /*
+     * Delete existing results ONLY after we have
+     * successfully validated a complete new result.
+     */
+    const { error: clearError } =
+      await db
+        .from("stage_results")
+        .delete()
+        .eq("stage_id", stageRow.id);
 
     if (clearError) {
       throw clearError;
     }
 
-    // Insert the official top 30.
-    const {
-      error: resultError
-    } = await db
-      .from("stage_results")
-      .insert(
-        riders.map((r) => ({
-          stage_id: stageRow.id,
-          finish_position: r.position,
-          rider_key: r.key,
-          rider_name: r.name,
-          points: POINTS[r.position - 1]
-        }))
-      );
+    const results = riders.map((r) => ({
+      stage_id: stageRow.id,
+      finish_position: r.position,
+      rider_key: r.key,
+      rider_name: r.name,
+      points: POINTS[r.position - 1],
+    }));
+
+    const { error: resultError } =
+      await db
+        .from("stage_results")
+        .insert(results);
 
     if (resultError) {
       throw resultError;
     }
 
-    return new Response(
-      JSON.stringify({
-        stage,
-        imported: true,
-        status: "published",
-        riders: riders.length
-      }),
-      {
-        status: 200,
-        headers: cors
-      }
-    );
+    return json({
+      stage,
+      imported: true,
+      status: "published",
+      riders: riders.length,
+    });
+
   } catch (error) {
     console.error(error);
 
-    return new Response(
-      JSON.stringify({
+    return json(
+      {
         error: "Internal importer error",
         message:
           error instanceof Error
             ? error.message
-            : String(error)
-      }),
-      {
-        status: 500,
-        headers: cors
-      }
+            : String(error),
+      },
+      500,
     );
   }
 });
