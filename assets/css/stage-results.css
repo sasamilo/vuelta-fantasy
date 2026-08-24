@@ -1,0 +1,7 @@
+.stage-result{border-top:1px solid var(--line)}
+.stage-result:first-child{border-top:0}
+.stage-result summary{cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:17px 0;font-weight:850;list-style:none}
+.stage-result summary::-webkit-details-marker{display:none}
+.stage-result[open] summary{color:var(--coral)}
+.stage-result .table-wrap{padding-bottom:12px}
+.stage-result table{min-width:360px}

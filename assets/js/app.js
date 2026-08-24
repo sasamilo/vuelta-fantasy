@@ -8,8 +8,27 @@
   const headers = { apikey: cfg.supabaseAnonKey, Authorization: `Bearer ${cfg.supabaseAnonKey}` };
   const get = async (path) => { const r = await fetch(`${cfg.supabaseUrl}/rest/v1/${path}`, {headers}); if (!r.ok) throw new Error(await r.text()); return r.json(); };
   const riderNames = (row) => (row.scoring_riders || []).map(x => `${escape(x.rider_name)} <small>(+${x.points})</small>`).join(', ') || '—';
+  const stageResults = (results) => {
+    const grouped = new Map();
+    results.forEach(row => {
+      if (!grouped.has(row.stage_id)) grouped.set(row.stage_id, { stage: row, riders: [] });
+      grouped.get(row.stage_id).riders.push(row);
+    });
+    if (!grouped.size) {
+      $('[data-stage-results]').innerHTML = '<p class="empty">No official stage results are available yet.</p>';
+      return;
+    }
+    $('[data-stage-results]').innerHTML = [...grouped.values()].map(({ stage, riders }, index) => `
+      <details class="stage-result"${index === 0 ? ' open' : ''}>
+        <summary><span>Stage ${stage.stage_number}${stage.stage_name ? ` · ${escape(stage.stage_name)}` : ''}</span><span class="pill">Top 30</span></summary>
+        <div class="table-wrap"><table><thead><tr><th>Place</th><th>Rider</th><th class="number">Points</th></tr></thead><tbody>
+          ${riders.map(rider => `<tr><td class="rank">${rider.finish_position}</td><td>${escape(rider.rider_name)}</td><td class="number"><strong>${rider.points}</strong></td></tr>`).join('')}
+        </tbody></table></div>
+      </details>`).join('');
+  };
   (async () => {
-    const [leaders, stages] = await Promise.all([get('leaderboard?select=*&order=total_points.desc,participant_name.asc'), get('public_stages?select=*&order=stage_number.desc&limit=1')]);
+    const [leaders, stages, results] = await Promise.all([get('leaderboard?select=*&order=total_points.desc,participant_name.asc'), get('public_stages?select=*&order=stage_number.desc&limit=1'), get('public_stage_results?select=stage_id,stage_number,stage_name,finish_position,rider_name,points&order=stage_number.desc,finish_position.asc')]);
+    stageResults(results);
     $('[data-stage-count]').textContent = `${stages.length ? stages[0].stage_number : 0} stage${stages.length === 1 ? '' : 's'} scored`;
     if (!leaders.length) empty('[data-leaderboard]',4,'No scored predictions yet.');
     else $('[data-leaderboard]').innerHTML = leaders.map((x,i) => `<tr><td class="rank">${i+1}</td><td>${escape(x.participant_name)}</td><td class="number"><strong>${x.total_points}</strong></td><td class="number">${x.stages_scored}</td></tr>`).join('');
@@ -23,5 +42,5 @@
     if (scores.length) $('[data-daily]').innerHTML = scores.map((x,i) => `<tr><td class="rank">${i+1}</td><td>${escape(x.participant_name)}</td><td>${riderNames(x)}</td><td class="number"><strong>${x.points}</strong></td></tr>`).join('');
     const byName = new Map(scores.map(x => [x.participant_name,x.points]));
     if (picks.length) $('[data-predictions]').innerHTML = picks.map(x => `<article class="pick-card"><h3>${escape(x.participant_name)} <span class="score-tag">${byName.get(x.participant_name) ?? 0} pts</span></h3><ol>${(x.rider_names || []).map(r => `<li>${escape(r)}</li>`).join('')}</ol></article>`).join('');
-  })().catch(() => { empty('[data-leaderboard]',4,'Scores are temporarily unavailable.'); });
+  })().catch(() => { empty('[data-leaderboard]',4,'Scores are temporarily unavailable.'); $('[data-stage-results]').innerHTML = '<p class="empty">Official results are temporarily unavailable.</p>'; });
 })();
