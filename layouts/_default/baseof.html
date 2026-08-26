@@ -11,6 +11,7 @@
     <link rel="stylesheet" href="{{ $stageResultsCss.RelPermalink }}" integrity="{{ $stageResultsCss.Data.Integrity }}">
     <script>
       window.VUELTA_ROUTE = {{ site.Data.vuelta_route | jsonify | safeJS }};
+      window.PARTICIPANT_IMAGES = {{ site.Data.participant_images | jsonify | safeJS }};
     </script>
     <script src="{{ "config.js" | relURL }}" defer></script>
     {{ $js := resources.Get "js/app.js" | minify | fingerprint }}
