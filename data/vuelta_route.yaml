@@ -56,7 +56,7 @@ stages:
   7:
     date: "2026-08-28"
     type: "Mountain"
-    start: "vall d'Alba"
+    start: "Vall d'Alba"
     finish: "Aramón Valdelinares"
     distance: "149.8 km"
     official_url: "https://www.lavuelta.es/en/stage-7"
