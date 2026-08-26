@@ -1,9 +1,22 @@
 {{ define "main" }}
 <section class="hero">
-  <p class="eyebrow">{{ site.Params.season }} · Five riders. Every stage.</p>
-  <h1>{{ site.Params.raceName }}</h1>
-  <div class="intro">{{ .Content }}</div>
-  <a class="button" data-form-link href="#" hidden>Make your picks</a>
+  <div class="hero-copy">
+    <p class="eyebrow">{{ site.Params.season }} · Five riders. Every stage.</p>
+    <h1>{{ site.Params.raceName }}</h1>
+    <div class="intro">{{ .Content }}</div>
+    <a class="button" data-form-link href="#" hidden>Make your picks</a>
+  </div>
+
+  <a class="stage-winner" data-stage-winner href="#" target="_blank" rel="noopener" hidden>
+    <div class="stage-winner__pic">
+      <img data-winner-image src="" alt="" loading="eager">
+    </div>
+    <div class="stage-winner__info">
+      <div class="stage-winner__award">Stage winner</div>
+      <div class="stage-winner__name" data-winner-name></div>
+      <div class="stage-winner__team" data-winner-team></div>
+    </div>
+  </a>
 </section>
 
 <section class="latest" aria-labelledby="latest-title">
