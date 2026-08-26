@@ -5,7 +5,11 @@
   const $ = (s) => document.querySelector(s);
   const escape = (v) => String(v ?? "").replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const empty = (selector, cols, text) => $(selector).innerHTML = `<tr><td colspan="${cols}" class="empty">${text}</td></tr>`;
-  const participantImage = (name) => participantImages[name] || participantImages[String(name).trim()] || '';
+  const firstName = (name) => String(name ?? '').trim().split(/\s+/)[0].replace(/[.,]/g, '');
+  const participantImage = (name) => {
+    const first = firstName(name);
+    return participantImages[first] || participantImages[first.normalize('NFD').replace(/[\u0300-\u036f]/g, '')] || '';
+  };
   const participantMarkup = (name) => {
     const safeName = escape(name);
     const image = participantImage(name);
