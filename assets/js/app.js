@@ -1,5 +1,6 @@
 (() => {
   const cfg = window.FANTASY_CONFIG || {};
+  const route = window.VUELTA_ROUTE || {};
   const $ = (s) => document.querySelector(s);
   const escape = (v) => String(v ?? "").replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const empty = (selector, cols, text) => $(selector).innerHTML = `<tr><td colspan="${cols}" class="empty">${text}</td></tr>`;
@@ -34,9 +35,20 @@
     else $('[data-leaderboard]').innerHTML = leaders.map((x,i) => `<tr><td class="rank">${i+1}</td><td>${escape(x.participant_name)}</td><td class="number"><strong>${x.total_points}</strong></td><td class="number">${x.stages_scored}</td></tr>`).join('');
     if (!stages.length) return;
     const stage = stages[0];
-    $('[data-latest-title]').textContent = `Stage ${stage.stage_number} · ${stage.stage_name || 'Official result'}`;
-    $('[data-latest-meta]').textContent = `${stage.result_date || 'Results published'} · top 30 scored`;
-    const link = $('[data-latest-link]'); link.href = stage.pcs_url; link.hidden = false;
+    const routeStage = route.stages?.[stage.stage_number];
+    if (routeStage) {
+      $('[data-latest-eyebrow]').textContent = `Stage ${stage.stage_number}`;
+      $('[data-latest-title]').textContent = `${routeStage.start} → ${routeStage.finish}`;
+      $('[data-latest-meta]').textContent = `${routeStage.type} · ${routeStage.distance} · ${routeStage.date}`;
+      const link = $('[data-latest-link]');
+      link.href = routeStage.official_url || stage.pcs_url || '#';
+      link.textContent = 'View stage ↗';
+      link.hidden = false;
+    } else {
+      $('[data-latest-title]').textContent = `Stage ${stage.stage_number} · ${stage.stage_name || 'Official result'}`;
+      $('[data-latest-meta]').textContent = `${stage.result_date || 'Results published'} · top 30 scored`;
+      const link = $('[data-latest-link]'); link.href = stage.pcs_url || '#'; link.hidden = !stage.pcs_url;
+    }
     $('[data-picks-stage]').textContent = `Stage ${stage.stage_number}`;
     const [scores, picks] = await Promise.all([get(`stage_scores?select=*&stage_id=eq.${stage.id}&order=points.desc,participant_name.asc`), get(`public_predictions?select=participant_name,rider_names,stage_id&stage_id=eq.${stage.id}&order=participant_name.asc`)]);
     if (scores.length) $('[data-daily]').innerHTML = scores.map((x,i) => `<tr><td class="rank">${i+1}</td><td>${escape(x.participant_name)}</td><td>${riderNames(x)}</td><td class="number"><strong>${x.points}</strong></td></tr>`).join('');
