@@ -4,3 +4,6 @@ work/
 .DS_Store
 .env
 supabase/.temp/
+
+node_modules/
+.env
