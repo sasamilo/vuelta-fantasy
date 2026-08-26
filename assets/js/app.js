@@ -27,6 +27,17 @@
         </tbody></table></div>
       </details>`).join('');
   };
+  const showWinner = (winner) => {
+    if (!winner?.name || !winner?.image) return;
+    const card = $('[data-stage-winner]');
+    const image = $('[data-winner-image]');
+    image.src = winner.image;
+    image.alt = winner.name;
+    $('[data-winner-name]').textContent = winner.display_name || winner.name;
+    $('[data-winner-team]').textContent = winner.team || '';
+    card.href = winner.url || '#';
+    card.hidden = false;
+  };
   (async () => {
     const [leaders, stages, results] = await Promise.all([get('leaderboard?select=*&order=total_points.desc,participant_name.asc'), get('public_stages?select=*&order=stage_number.desc&limit=1'), get('public_stage_results?select=stage_id,stage_number,stage_name,finish_position,rider_name,points&order=stage_number.desc,finish_position.asc')]);
     stageResults(results);
@@ -44,6 +55,7 @@
       link.href = routeStage.official_url || stage.pcs_url || '#';
       link.textContent = 'View stage ↗';
       link.hidden = false;
+      if (routeStage.winner) showWinner(routeStage.winner);
     } else {
       $('[data-latest-title]').textContent = `Stage ${stage.stage_number} · ${stage.stage_name || 'Official result'}`;
       $('[data-latest-meta]').textContent = `${stage.result_date || 'Results published'} · top 30 scored`;
