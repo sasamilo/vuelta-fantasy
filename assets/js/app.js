@@ -1,20 +1,24 @@
 (() => {
   const cfg = window.FANTASY_CONFIG || {};
   const route = window.VUELTA_ROUTE || {};
-  const participantImages = window.PARTICIPANT_IMAGES?.participants || {};
+  const participantImages = {
+    sasa: "https://thinktank.preskok.si/wp-content/uploads/2026/02/Sasa-Milo-768x768.webp",
+    lovro: "https://i.imgur.com/7OdZQyk.jpg",
+    robert: "https://preskok.si/wp-content/uploads/2025/08/Robert-Golob.webp",
+    samo: "https://autobrief.io/wp-content/uploads/2025/09/Samo_Pavlovic-portfolio.webp",
+    matej: "https://preskok.si/wp-content/uploads/2025/08/Matej-Klinc.webp",
+    blaz: "https://preskok.si/wp-content/uploads/2026/05/Blaz-Lipar.webp"
+  };
   const $ = (s) => document.querySelector(s);
   const escape = (v) => String(v ?? "").replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const empty = (selector, cols, text) => $(selector).innerHTML = `<tr><td colspan="${cols}" class="empty">${text}</td></tr>`;
-  const firstName = (name) => String(name ?? '').trim().split(/\s+/)[0].replace(/[.,]/g, '');
-  const participantImage = (name) => {
-    const first = firstName(name);
-    return participantImages[first] || participantImages[first.normalize('NFD').replace(/[\u0300-\u036f]/g, '')] || '';
-  };
+  const firstName = (name) => String(name ?? '').trim().split(/\s+/)[0].replace(/[.,]/g, '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  const participantImage = (name) => participantImages[firstName(name)] || '';
   const participantMarkup = (name) => {
     const safeName = escape(name);
     const image = participantImage(name);
     return image
-      ? `<span class="participant-cell"><img class="participant-avatar" src="${escape(image)}" alt="" loading="lazy"> <span>${safeName}</span></span>`
+      ? `<span class="participant-cell"><img class="participant-avatar" src="${escape(image)}" alt="${safeName}" loading="lazy"> <span>${safeName}</span></span>`
       : safeName;
   };
   if (cfg.googleFormUrl) { const el = $('[data-form-link]'); el.href = cfg.googleFormUrl; el.hidden = false; }
@@ -28,10 +32,7 @@
       if (!grouped.has(row.stage_id)) grouped.set(row.stage_id, { stage: row, riders: [] });
       grouped.get(row.stage_id).riders.push(row);
     });
-    if (!grouped.size) {
-      $('[data-stage-results]').innerHTML = '<p class="empty">No official stage results are available yet.</p>';
-      return;
-    }
+    if (!grouped.size) { $('[data-stage-results]').innerHTML = '<p class="empty">No official stage results are available yet.</p>'; return; }
     $('[data-stage-results]').innerHTML = [...grouped.values()].map(({ stage, riders }, index) => `
       <details class="stage-result"${index === 0 ? ' open' : ''}>
         <summary><span>Stage ${stage.stage_number}${stage.stage_name ? ` · ${escape(stage.stage_name)}` : ''}</span><span class="pill">Top 30</span></summary>
@@ -44,12 +45,10 @@
     if (!winner?.name || !winner?.image) return;
     const card = $('[data-stage-winner]');
     const image = $('[data-winner-image]');
-    image.src = winner.image;
-    image.alt = winner.name;
+    image.src = winner.image; image.alt = winner.name;
     $('[data-winner-name]').textContent = winner.display_name || winner.name;
     $('[data-winner-team]').textContent = winner.team || '';
-    card.href = winner.url || '#';
-    card.hidden = false;
+    card.href = winner.url || '#'; card.hidden = false;
   };
   (async () => {
     const [leaders, stages, results] = await Promise.all([get('leaderboard?select=*&order=total_points.desc,participant_name.asc'), get('public_stages?select=*&order=stage_number.desc&limit=1'), get('public_stage_results?select=stage_id,stage_number,stage_name,finish_position,rider_name,points&order=stage_number.desc,finish_position.asc')]);
@@ -64,10 +63,7 @@
       $('[data-latest-eyebrow]').textContent = `Stage ${stage.stage_number}`;
       $('[data-latest-title]').textContent = `${routeStage.start} → ${routeStage.finish}`;
       $('[data-latest-meta]').textContent = `${routeStage.type} · ${routeStage.distance} · ${routeStage.date}`;
-      const link = $('[data-latest-link]');
-      link.href = routeStage.official_url || stage.pcs_url || '#';
-      link.textContent = 'View stage ↗';
-      link.hidden = false;
+      const link = $('[data-latest-link]'); link.href = routeStage.official_url || stage.pcs_url || '#'; link.textContent = 'View stage ↗'; link.hidden = false;
       if (routeStage.winner) showWinner(routeStage.winner);
     } else {
       $('[data-latest-title]').textContent = `Stage ${stage.stage_number} · ${stage.stage_name || 'Official result'}`;
