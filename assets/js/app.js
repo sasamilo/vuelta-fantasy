@@ -1,113 +1,16 @@
 (() => {
   const cfg = window.FANTASY_CONFIG || {};
   const route = window.VUELTA_ROUTE || {};
-  const participantImages = {
-    sasa: "https://thinktank.preskok.si/wp-content/uploads/2026/02/Sasa-Milo-768x768.webp",
-    lovro: "https://i.imgur.com/7OdZQyk.jpg",
-    robert: "https://preskok.si/wp-content/uploads/2025/08/Robert-Golob.webp",
-    samo: "https://autobrief.io/wp-content/uploads/2025/09/Samo_Pavlovic-portfolio.webp",
-    matej: "https://preskok.si/wp-content/uploads/2025/08/Matej-Klinc.webp",
-    blaz: "https://preskok.si/wp-content/uploads/2026/05/Blaz-Lipar.webp"
-  };
-
-  const $ = (s) => document.querySelector(s);
-  const escape = (v) => String(v ?? "").replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  const empty = (selector, cols, text) => { const el = $(selector); if (el) el.innerHTML = `<tr><td colspan="${cols}" class="empty">${text}</td></tr>`; };
-  const firstName = (name) => String(name ?? '').trim().split(/\s+/)[0].replace(/[.,]/g, '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
-  const participantImage = (name) => participantImages[firstName(name)] || '';
-  const participantMarkup = (name) => {
-    const safeName = escape(name);
-    const image = participantImage(name);
-    return image ? `<span class="participant-cell"><img class="participant-avatar" src="${escape(image)}" alt="${safeName}" loading="lazy"> <span>${safeName}</span></span>` : safeName;
-  };
-
-  if (cfg.googleFormUrl) { const el = $('[data-form-link]'); el.href = cfg.googleFormUrl; el.hidden = false; }
-  if (!cfg.supabaseUrl || !cfg.supabaseAnonKey) { empty('[data-leaderboard]', 4, 'Configure Supabase to publish standings.'); return; }
-
-  const headers = { apikey: cfg.supabaseAnonKey, Authorization: `Bearer ${cfg.supabaseAnonKey}` };
-  const get = async (path) => { const r = await fetch(`${cfg.supabaseUrl}/rest/v1/${path}`, { headers }); if (!r.ok) throw new Error(await r.text()); return r.json(); };
-  const riderNames = (row) => (row.scoring_riders || []).map(x => `${escape(x.rider_name)} <small>(+${x.points})</small>`).join(', ') || '—';
-
-  const stageResults = (results) => {
-    const grouped = new Map();
-    results.forEach(row => { if (!grouped.has(row.stage_id)) grouped.set(row.stage_id, { stage: row, riders: [] }); grouped.get(row.stage_id).riders.push(row); });
-    if (!grouped.size) { $('[data-stage-results]').innerHTML = '<p class="empty">No official stage results are available yet.</p>'; return; }
-    $('[data-stage-results]').innerHTML = [...grouped.values()].map(({ stage, riders }, index) => `
-      <details class="stage-result"${index === 0 ? ' open' : ''}>
-        <summary><span>Stage ${stage.stage_number}${stage.stage_name ? ` · ${escape(stage.stage_name)}` : ''}</span><span class="pill">Top 30</span></summary>
-        <div class="table-wrap"><table><thead><tr><th>Place</th><th>Rider</th><th class="number">Points</th></tr></thead><tbody>
-          ${riders.map(rider => `<tr><td class="rank">${rider.finish_position}</td><td>${rider.rider_url ? `<a href="${escape(rider.rider_url)}" target="_blank" rel="noopener">${escape(rider.rider_name)}</a>` : escape(rider.rider_name)}</td><td class="number"><strong>${rider.points}</strong></td></tr>`).join('')}
-        </tbody></table></div>
-      </details>`).join('');
-  };
-
-  const initials = (name) => { const parts = String(name || '').trim().split(/\s+/).filter(Boolean); if (!parts.length) return '?'; const first = parts[0].replace(/[^A-Za-zÀ-ž]/g, ''); const last = parts.length > 1 ? parts[parts.length - 1].replace(/[^A-Za-zÀ-ž]/g, '') : ''; return `${first.charAt(0)}${last.charAt(0) || ''}`.toUpperCase(); };
-  const winnerFallbackImage = (name) => `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 400"><rect width="300" height="400" fill="#d9ff43"/><text x="150" y="220" text-anchor="middle" font-family="Arial,sans-serif" font-size="88" font-weight="900" fill="#11231f">${escape(initials(name))}</text></svg>`)}`;
-
-  const showWinner = (winner) => {
-    if (!winner?.name) return;
-    const card = $('[data-stage-winner]'); const image = $('[data-winner-image]');
-    if (!card || !image) return;
-    image.src = winner.image || winnerFallbackImage(winner.name); image.alt = winner.name;
-    $('[data-winner-name]').textContent = winner.display_name || winner.name;
-    $('[data-winner-team]').textContent = winner.team || '';
-    card.href = winner.url || '#'; card.hidden = false;
-  };
-
-  (async () => {
-    const [leaders, stages, results] = await Promise.all([
-      get('leaderboard?select=*&order=total_points.desc,participant_name.asc'),
-      get('public_stages?select=*&order=stage_number.desc&limit=1'),
-      get('public_rider_results?select=stage_id,stage_number,stage_name,finish_position,rider_name,rider_url,points&order=stage_number.desc,finish_position.asc')
-    ]);
-
-    stageResults(results);
-    const stageCount = stages.length ? stages[0].stage_number : 0;
-    $('[data-stage-count]').textContent = `${stageCount} stage${stageCount === 1 ? '' : 's'} scored`;
-
-    if (!leaders.length) empty('[data-leaderboard]', 4, 'No scored predictions yet.');
-    else $('[data-leaderboard]').innerHTML = leaders.map((x, i) => `<tr><td class="rank">${i + 1}</td><td>${participantMarkup(x.participant_name)}</td><td class="number"><strong>${x.total_points}</strong></td><td class="number">${x.stages_scored}</td></tr>`).join('');
-    if (!stages.length) return;
-
-    const stage = stages[0]; const routeStage = route.stages?.[stage.stage_number];
-    if (routeStage) {
-      $('[data-latest-eyebrow]').textContent = `Stage ${stage.stage_number}`;
-      $('[data-latest-title]').textContent = `${routeStage.start} → ${routeStage.finish}`;
-      $('[data-latest-meta]').textContent = `${routeStage.type} · ${routeStage.distance} · ${routeStage.date}`;
-      const link = $('[data-latest-link]'); link.href = routeStage.official_url || stage.pcs_url || '#'; link.textContent = 'View stage ↗'; link.hidden = false;
-    } else {
-      $('[data-latest-title]').textContent = `Stage ${stage.stage_number} · ${stage.stage_name || 'Official result'}`;
-      $('[data-latest-meta]').textContent = `${stage.result_date || 'Results published'} · top 30 scored`;
-      const link = $('[data-latest-link]'); link.href = stage.pcs_url || '#'; link.hidden = !stage.pcs_url;
-    }
-
-    // Universal winner: official published position 1 + official La Vuelta rider URL.
-    const latestWinner = results.find(r => Number(r.stage_id) === Number(stage.id) && Number(r.finish_position) === 1);
-    if (latestWinner) {
-      showWinner({
-        name: latestWinner.rider_name,
-        display_name: routeStage?.winner?.display_name || latestWinner.rider_name,
-        team: routeStage?.winner?.team || '',
-        image: routeStage?.winner?.image || '',
-        url: latestWinner.rider_url || '#'
-      });
-    }
-
-    $('[data-picks-stage]').textContent = `Stage ${stage.stage_number}`;
-    const [scores, picks] = await Promise.all([
-      get(`stage_scores?select=*&stage_id=eq.${stage.id}&order=points.desc,participant_name.asc`),
-      get(`public_predictions?select=participant_name,rider_names,stage_id&stage_id=eq.${stage.id}&order=participant_name.asc`)
-    ]);
-
-    if (scores.length) $('[data-daily]').innerHTML = scores.map((x, i) => `<tr><td class="rank">${i + 1}</td><td>${participantMarkup(x.participant_name)}</td><td>${riderNames(x)}</td><td class="number"><strong>${x.points}</strong></td></tr>`).join('');
-    else empty('[data-daily]', 4, 'No predictions were submitted for this stage.');
-
-    const byName = new Map(scores.map(x => [x.participant_name, x.points]));
-    if (picks.length) $('[data-predictions]').innerHTML = picks.map(x => `<article class="pick-card"><h3><span class="participant-heading">${participantMarkup(x.participant_name)}</span> <span class="score-tag">${byName.get(x.participant_name) ?? 0} pts</span></h3><ol>${(x.rider_names || []).map(r => `<li>${escape(r)}</li>`).join('')}</ol></article>`).join('');
-  })().catch((error) => {
-    console.error('Vuelta Fantasy data load failed:', error);
-    empty('[data-leaderboard]', 4, 'Scores are temporarily unavailable.');
-    empty('[data-daily]', 4, 'Scores are temporarily unavailable.');
-    $('[data-stage-results]').innerHTML = '<p class="empty">Official results are temporarily unavailable.</p>';
-  });
-})();
+  const participantImages = { sasa:"https://thinktank.preskok.si/wp-content/uploads/2026/02/Sasa-Milo-768x768.webp", lovro:"https://i.imgur.com/7OdZQyk.jpg", robert:"https://preskok.si/wp-content/uploads/2025/08/Robert-Golob.webp", samo:"https://autobrief.io/wp-content/uploads/2025/09/Samo_Pavlovic-portfolio.webp", matej:"https://preskok.si/wp-content/uploads/2025/08/Matej-Klinc.webp", blaz:"https://preskok.si/wp-content/uploads/2026/05/Blaz-Lipar.webp" };
+  const $=s=>document.querySelector(s); const escape=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const empty=(s,c,t)=>{const e=$(s);if(e)e.innerHTML=`<tr><td colspan="${c}" class="empty">${t}</td></tr>`};
+  const firstName=n=>String(n??'').trim().split(/\s+/)[0].replace(/[.,]/g,'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
+  const participantMarkup=n=>{const x=escape(n),i=participantImages[firstName(n)]||'';return i?`<span class="participant-cell"><img class="participant-avatar" src="${escape(i)}" alt="${x}" loading="lazy"> <span>${x}</span></span>`:x};
+  if(cfg.googleFormUrl){const e=$('[data-form-link]');e.href=cfg.googleFormUrl;e.hidden=false} if(!cfg.supabaseUrl||!cfg.supabaseAnonKey){empty('[data-leaderboard]',4,'Configure Supabase to publish standings.');return}
+  const headers={apikey:cfg.supabaseAnonKey,Authorization:`Bearer ${cfg.supabaseAnonKey}`}; const get=async p=>{const r=await fetch(`${cfg.supabaseUrl}/rest/v1/${p}`,{headers});if(!r.ok)throw Error(await r.text());return r.json()};
+  const riderNames=row=>(row.scoring_riders||[]).map(x=>`${escape(x.rider_name)} <small>(+${x.points})</small>`).join(', ')||'—';
+  const stageResults=results=>{const g=new Map();results.forEach(r=>{if(!g.has(r.stage_id))g.set(r.stage_id,{stage:r,riders:[]});g.get(r.stage_id).riders.push(r)});if(!g.size){$('[data-stage-results]').innerHTML='<p class="empty">No official stage results are available yet.</p>';return}$('[data-stage-results]').innerHTML=[...g.values()].map(({stage,riders},i)=>`<details class="stage-result"${i===0?' open':''}><summary><span>Stage ${stage.stage_number}${stage.stage_name?` · ${escape(stage.stage_name)}`:''}</span><span class="pill">Top 30</span></summary><div class="table-wrap"><table><thead><tr><th>Place</th><th>Rider</th><th class="number">Points</th></tr></thead><tbody>${riders.map(r=>`<tr><td class="rank">${r.finish_position}</td><td>${r.rider_url?`<a href="${escape(r.rider_url)}" target="_blank" rel="noopener">${escape(r.rider_name)}</a>`:escape(r.rider_name)}</td><td class="number"><strong>${r.points}</strong></td></tr>`).join('')}</tbody></table></div></details>`).join('')};
+  const initials=n=>{const p=String(n||'').trim().split(/\s+/).filter(Boolean);return p.length?`${p[0][0]}${p.length>1?p[p.length-1][0]:''}`.toUpperCase():'?'};
+  const fallback=n=>`data:image/svg+xml;charset=UTF-8,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 400"><rect width="300" height="400" fill="#d9ff43"/><text x="150" y="220" text-anchor="middle" font-family="Arial,sans-serif" font-size="88" font-weight="900" fill="#11231f">${escape(initials(n))}</text></svg>`)}`;
+  const showWinner=w=>{const card=$('[data-stage-winner]'),img=$('[data-winner-image]');if(!card||!img||!w?.name)return;img.onerror=()=>{if(img.src!==fallback(w.name))img.src=fallback(w.name)};img.src=w.image||fallback(w.name);img.alt=w.name;$('[data-winner-name]').textContent=w.display_name||w.name;$('[data-winner-team]').textContent=w.team||'';card.href=w.url||'#';card.hidden=false};
+  (async()=>{const[leaders,stages,results]=await Promise.all([get('leaderboard?select=*&order=total_points.desc,participant_name.asc'),get('public_stages?select=*&order=stage_number.desc&limit=1'),get('public_rider_results?select=stage_id,stage_number,stage_name,finish_position,rider_name,rider_url,rider_image,points&order=stage_number.desc,finish_position.asc')]);stageResults(results);const count=stages.length?stages[0].stage_number:0;$('[data-stage-count]').textContent=`${count} stage${count===1?'':'s'} scored`;if(!leaders.length)empty('[data-leaderboard]',4,'No scored predictions yet.');else $('[data-leaderboard]').innerHTML=leaders.map((x,i)=>`<tr><td class="rank">${i+1}</td><td>${participantMarkup(x.participant_name)}</td><td class="number"><strong>${x.total_points}</strong></td><td class="number">${x.stages_scored}</td></tr>`).join('');if(!stages.length)return;const stage=stages[0],routeStage=route.stages?.[stage.stage_number];if(routeStage){$('[data-latest-eyebrow]').textContent=`Stage ${stage.stage_number}`;$('[data-latest-title]').textContent=`${routeStage.start} → ${routeStage.finish}`;$('[data-latest-meta]').textContent=`${routeStage.type} · ${routeStage.distance} · ${routeStage.date}`;const l=$('[data-latest-link]');l.href=routeStage.official_url||stage.pcs_url||'#';l.textContent='View stage ↗';l.hidden=false}else{$('[data-latest-title]').textContent=`Stage ${stage.stage_number} · ${stage.stage_name||'Official result'}`;$('[data-latest-meta]').textContent=`${stage.result_date||'Results published'} · top 30 scored`;const l=$('[data-latest-link]');l.href=stage.pcs_url||'#';l.hidden=!stage.pcs_url}const winner=results.find(r=>Number(r.stage_id)===Number(stage.id)&&Number(r.finish_position)===1);if(winner)showWinner({name:winner.rider_name,display_name:routeStage?.winner?.display_name||winner.rider_name,team:routeStage?.winner?.team||'',image:winner.rider_image||'',url:winner.rider_url||'#'});$('[data-picks-stage]').textContent=`Stage ${stage.stage_number}`;const[scores,picks]=await Promise.all([get(`stage_scores?select=*&stage_id=eq.${stage.id}&order=points.desc,participant_name.asc`),get(`public_predictions?select=participant_name,rider_names,stage_id&stage_id=eq.${stage.id}&order=participant_name.asc`)]);if(scores.length)$('[data-daily]').innerHTML=scores.map((x,i)=>`<tr><td class="rank">${i+1}</td><td>${participantMarkup(x.participant_name)}</td><td>${riderNames(x)}</td><td class="number"><strong>${x.points}</strong></td></tr>`).join('');else empty('[data-daily]',4,'No predictions were submitted for this stage.');const byName=new Map(scores.map(x=>[x.participant_name,x.points]));if(picks.length)$('[data-predictions]').innerHTML=picks.map(x=>`<article class="pick-card"><h3><span class="participant-heading">${participantMarkup(x.participant_name)}</span> <span class="score-tag">${byName.get(x.participant_name)??0} pts</span></h3><ol>${(x.rider_names||[]).map(r=>`<li>${escape(r)}</li>`).join('')}</ol></article>`).join('')})().catch(error=>{console.error('Vuelta Fantasy data load failed:',error);empty('[data-leaderboard]',4,'Scores are temporarily unavailable.');empty('[data-daily]',4,'Scores are temporarily unavailable.');$('[data-stage-results]').innerHTML='<p class="empty">Official results are temporarily unavailable.</p>'})})();
