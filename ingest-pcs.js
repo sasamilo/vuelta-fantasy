@@ -29,24 +29,52 @@ async function fetchJson(url, label) {
   return response.json();
 }
 
-async function fetchOfficialRiderUrls(bibs) {
+function firstOfficialImage(html, bib) {
+  const escapedBib = String(bib).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const patterns = [
+    new RegExp(`https://img\\.aso\\.fr/[^\\"'<>\\s]*?/img-cycling-vue-png/${escapedBib}/[^\\"'<>\\s]+`, "i"),
+    new RegExp(`https://img\\.aso\\.fr/[^\\"'<>\\s]+`, "i")
+  ];
+  for (const pattern of patterns) {
+    const match = html.match(pattern);
+    if (match?.[0]) return match[0].replace(/&amp;/g, "&");
+  }
+  return null;
+}
+
+async function fetchOfficialRiderProfiles(bibs) {
   console.log(`\nFetching official La Vuelta rider directory...\n${VUELTA_RIDERS_URL}`);
   const response = await fetch(VUELTA_RIDERS_URL, {
     headers: { accept: "text/html", "user-agent": "Mozilla/5.0 Vuelta-Fantasy/1.0" }
   });
   if (!response.ok) throw new Error(`La Vuelta rider directory returned HTTP ${response.status}`);
   const html = await response.text();
-  const urls = new Map();
+  const profiles = new Map();
 
   for (const bib of bibs) {
     const escapedBib = String(bib).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const pattern = new RegExp(`href=["'](\\/en\\/rider\\/${escapedBib}\\/[^"']+)["']`, "i");
     const match = html.match(pattern);
-    if (match?.[1]) urls.set(Number(bib), `${VUELTA_BASE}${match[1]}`);
+    if (!match?.[1]) continue;
+
+    const url = `${VUELTA_BASE}${match[1]}`;
+    let image = null;
+    try {
+      const profileResponse = await fetch(url, {
+        headers: { accept: "text/html", "user-agent": "Mozilla/5.0 Vuelta-Fantasy/1.0" }
+      });
+      if (profileResponse.ok) image = firstOfficialImage(await profileResponse.text(), bib);
+    } catch (error) {
+      console.warn(`Could not fetch profile image for bib ${bib}: ${error.message}`);
+    }
+
+    profiles.set(Number(bib), { url, image });
   }
 
-  console.log(`✓ Matched ${urls.size}/${bibs.length} official rider profile URLs`);
-  return urls;
+  const images = [...profiles.values()].filter(profile => profile.image).length;
+  console.log(`✓ Matched ${profiles.size}/${bibs.length} official rider profiles`);
+  console.log(`✓ Matched ${images}/${bibs.length} official rider photos`);
+  return profiles;
 }
 
 async function importStage(stage, db) {
@@ -61,8 +89,7 @@ async function importStage(stage, db) {
 
   if (!finalClassifications.length) return { imported: false, reason: "No final classification with at least 30 riders yet." };
 
-  const finalClassification = finalClassifications[0];
-  const finalRankings = asArray(finalClassification);
+  const finalRankings = asArray(finalClassifications[0]);
   const competitors = asArray(await fetchJson(`${RACE_CENTER_BASE}/allCompetitors-${RACE_YEAR}`, "RaceCenter competitor data"));
   if (!competitors.length) throw new Error("RaceCenter returned no competitor records.");
 
@@ -83,18 +110,18 @@ async function importStage(stage, db) {
   const positions = new Set(results.map(r => r.position));
   if (results.length !== 30 || positions.size !== 30) return { imported: false, reason: `Expected 30 unique positions, found ${results.length}/${positions.size}.` };
 
-  const bibs = results.map(r => r.bib);
-  const riderUrls = await fetchOfficialRiderUrls(bibs);
-
+  const profiles = await fetchOfficialRiderProfiles(results.map(r => r.bib));
   const riders = results.map(result => {
     const rider = ridersByBib.get(result.bib);
     if (!rider) throw new Error(`Could not resolve rider for bib ${result.bib} at position ${result.position}.`);
+    const profile = profiles.get(rider.bib) || {};
     return {
       position: result.position,
       bib: rider.bib,
       name: rider.name,
       key: rider.key,
-      url: riderUrls.get(rider.bib) || null,
+      url: profile.url || null,
+      image: profile.image || null,
       points: POINTS[result.position - 1]
     };
   });
@@ -114,6 +141,7 @@ async function importStage(stage, db) {
     rider_key: r.key,
     rider_name: r.name,
     rider_url: r.url,
+    rider_image: r.image,
     points: r.points
   }));
   const { error: insertError } = await db.from("stage_results").insert(rows);
@@ -145,7 +173,6 @@ async function main() {
     return;
   }
 
-  // Automatic mode: import the first scheduled stage that is not yet published.
   const { data: stages, error } = await db.from("stages").select("stage_number,status,result_date").order("stage_number", { ascending: true });
   if (error) throw new Error(`Could not load stages: ${error.message}`);
 
