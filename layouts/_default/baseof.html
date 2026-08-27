@@ -16,6 +16,10 @@
     <script src="{{ "config.js" | relURL }}" defer></script>
     {{ $js := resources.Get "js/app.js" | minify | fingerprint }}
     <script src="{{ $js.RelPermalink }}" integrity="{{ $js.Data.Integrity }}" defer></script>
+    {{ if .IsHome }}
+    {{ $historyJs := resources.Get "js/history.js" | minify | fingerprint }}
+    <script src="{{ $historyJs.RelPermalink }}" integrity="{{ $historyJs.Data.Integrity }}" defer></script>
+    {{ end }}
   </head>
   <body>
     <header class="site-header">
