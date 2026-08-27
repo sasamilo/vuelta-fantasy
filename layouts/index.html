@@ -8,23 +8,13 @@
   </div>
 
   <a class="stage-winner" data-stage-winner href="#" target="_blank" rel="noopener" hidden>
-    <div class="stage-winner__pic">
-      <img data-winner-image src="" alt="" loading="eager">
-    </div>
-    <div class="stage-winner__info">
-      <div class="stage-winner__award">Stage winner</div>
-      <div class="stage-winner__name" data-winner-name></div>
-      <div class="stage-winner__team" data-winner-team></div>
-    </div>
+    <div class="stage-winner__pic"><img data-winner-image src="" alt="" loading="eager"></div>
+    <div class="stage-winner__info"><div class="stage-winner__award">Stage winner</div><div class="stage-winner__name" data-winner-name></div><div class="stage-winner__team" data-winner-team></div></div>
   </a>
 </section>
 
 <section class="latest" aria-labelledby="latest-title">
-  <div>
-    <p class="eyebrow" data-latest-eyebrow>Latest stage</p>
-    <h2 id="latest-title" data-latest-title>Waiting for results</h2>
-    <p data-latest-meta>Stage information will appear here after the first official stage classification.</p>
-  </div>
+  <div><p class="eyebrow" data-latest-eyebrow>Latest stage</p><h2 id="latest-title" data-latest-title>Waiting for results</h2><p data-latest-meta>Stage information will appear here after the first official stage classification.</p></div>
   <a data-latest-link class="text-link" href="#" hidden>View stage ↗</a>
 </section>
 
@@ -38,9 +28,19 @@
   <div class="table-wrap"><table><thead><tr><th>Rank</th><th>Player</th><th>Scoring riders</th><th class="number">Points</th></tr></thead><tbody data-daily><tr><td colspan="4" class="empty">No completed stage yet.</td></tr></tbody></table></div>
 </section>
 
+<section id="daily-history" class="panel" hidden>
+  <div class="section-heading"><div><p class="eyebrow">History</p><h2>Previous stage scores</h2></div></div>
+  <div data-daily-history></div>
+</section>
+
 <section id="picks" class="panel">
   <div class="section-heading"><div><p class="eyebrow">Latest stage</p><h2>Participant predictions</h2></div><span data-picks-stage></span></div>
   <div class="picks-grid" data-predictions><p class="empty">No predictions are available yet.</p></div>
+</section>
+
+<section id="picks-history" class="panel" hidden>
+  <div class="section-heading"><div><p class="eyebrow">History</p><h2>Previous stage predictions</h2></div></div>
+  <div data-picks-history></div>
 </section>
 
 <section id="stage-results" class="panel" aria-labelledby="stage-results-title">
