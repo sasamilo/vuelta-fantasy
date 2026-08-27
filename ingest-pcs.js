@@ -5,6 +5,8 @@ const { createClient } = require("@supabase/supabase-js");
 const POINTS = [100,80,60,50,45,40,36,32,29,26,24,22,20,18,16,15,14,13,12,11,10,9,8,7,6,5,4,3,2,1];
 const RACE_YEAR = 2026;
 const RACE_CENTER_BASE = "https://racecenter.lavuelta.es/api";
+const VUELTA_RIDERS_URL = "https://www.lavuelta.es/en/riders";
+const VUELTA_BASE = "https://www.lavuelta.es";
 
 function riderKey(value) {
   return String(value || "")
@@ -25,6 +27,26 @@ async function fetchJson(url, label) {
   const response = await fetch(url, { headers: { accept: "application/json", "user-agent": "Mozilla/5.0 Vuelta-Fantasy/1.0" } });
   if (!response.ok) throw new Error(`${label} returned HTTP ${response.status}`);
   return response.json();
+}
+
+async function fetchOfficialRiderUrls(bibs) {
+  console.log(`\nFetching official La Vuelta rider directory...\n${VUELTA_RIDERS_URL}`);
+  const response = await fetch(VUELTA_RIDERS_URL, {
+    headers: { accept: "text/html", "user-agent": "Mozilla/5.0 Vuelta-Fantasy/1.0" }
+  });
+  if (!response.ok) throw new Error(`La Vuelta rider directory returned HTTP ${response.status}`);
+  const html = await response.text();
+  const urls = new Map();
+
+  for (const bib of bibs) {
+    const escapedBib = String(bib).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const pattern = new RegExp(`href=["'](\\/en\\/rider\\/${escapedBib}\\/[^"']+)["']`, "i");
+    const match = html.match(pattern);
+    if (match?.[1]) urls.set(Number(bib), `${VUELTA_BASE}${match[1]}`);
+  }
+
+  console.log(`✓ Matched ${urls.size}/${bibs.length} official rider profile URLs`);
+  return urls;
 }
 
 async function importStage(stage, db) {
@@ -61,10 +83,20 @@ async function importStage(stage, db) {
   const positions = new Set(results.map(r => r.position));
   if (results.length !== 30 || positions.size !== 30) return { imported: false, reason: `Expected 30 unique positions, found ${results.length}/${positions.size}.` };
 
+  const bibs = results.map(r => r.bib);
+  const riderUrls = await fetchOfficialRiderUrls(bibs);
+
   const riders = results.map(result => {
     const rider = ridersByBib.get(result.bib);
     if (!rider) throw new Error(`Could not resolve rider for bib ${result.bib} at position ${result.position}.`);
-    return { position: result.position, bib: rider.bib, name: rider.name, key: rider.key, points: POINTS[result.position - 1] };
+    return {
+      position: result.position,
+      bib: rider.bib,
+      name: rider.name,
+      key: rider.key,
+      url: riderUrls.get(rider.bib) || null,
+      points: POINTS[result.position - 1]
+    };
   });
 
   if (new Set(riders.map(r => r.bib)).size !== 30) throw new Error("Top 30 contains duplicate rider bibs.");
@@ -76,7 +108,14 @@ async function importStage(stage, db) {
   const { error: clearError } = await db.from("stage_results").delete().eq("stage_id", stageRow.id);
   if (clearError) throw new Error(`Could not clear existing results: ${clearError.message}`);
 
-  const rows = riders.map(r => ({ stage_id: stageRow.id, finish_position: r.position, rider_key: r.key, rider_name: r.name, points: r.points }));
+  const rows = riders.map(r => ({
+    stage_id: stageRow.id,
+    finish_position: r.position,
+    rider_key: r.key,
+    rider_name: r.name,
+    rider_url: r.url,
+    points: r.points
+  }));
   const { error: insertError } = await db.from("stage_results").insert(rows);
   if (insertError) throw new Error(`Could not insert stage results: ${insertError.message}`);
 
@@ -116,7 +155,6 @@ async function main() {
     const result = await importStage(Number(stage.stage_number), db);
     if (result.imported) return;
     console.log(`Stage ${stage.stage_number}: ${result.reason}`);
-    // Stop at the first unpublished stage so a future stage can never be published out of order.
     return;
   }
 
