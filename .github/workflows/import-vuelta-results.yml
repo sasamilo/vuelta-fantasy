@@ -1,0 +1,27 @@
+name: Import Vuelta results
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 18:30 and 19:30 Slovenia time during CEST = 16:30 and 17:30 UTC.
+    - cron: '30 16 * * *'
+    - cron: '30 17 * * *'
+
+permissions:
+  contents: read
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Import next unpublished stage
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node ingest-pcs.js
