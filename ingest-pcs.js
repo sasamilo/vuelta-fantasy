@@ -14,6 +14,10 @@ function riderKey(value) {
     .toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }
 
+function nameTokens(value) {
+  return riderKey(value).split("-").filter(Boolean);
+}
+
 function asArray(value) {
   if (Array.isArray(value)) return value;
   if (Array.isArray(value?.rankings)) return value.rankings;
@@ -29,11 +33,10 @@ async function fetchJson(url, label) {
   return response.json();
 }
 
-function firstOfficialImage(html, bib) {
-  const escapedBib = String(bib).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+function firstOfficialImage(html) {
   const patterns = [
-    new RegExp(`https://img\\.aso\\.fr/[^\\"'<>\\s]*?/img-cycling-vue-png/${escapedBib}/[^\\"'<>\\s]+`, "i"),
-    new RegExp(`https://img\\.aso\\.fr/[^\\"'<>\\s]+`, "i")
+    /https:\/\/img\.aso\.fr\/[^\"'<>\s]*\/img-cycling-vue-png\/[^\"'<>\s]+/i,
+    /https:\/\/img\.aso\.fr\/[^\"'<>\s]+/i
   ];
   for (const pattern of patterns) {
     const match = html.match(pattern);
@@ -42,38 +45,73 @@ function firstOfficialImage(html, bib) {
   return null;
 }
 
-async function fetchOfficialRiderProfiles(bibs) {
+function extractOfficialRiderLinks(html) {
+  const links = [];
+  const pattern = /href=["'](\/en\/rider\/\d+\/[^"']+)["']/gi;
+  let match;
+  while ((match = pattern.exec(html)) !== null) {
+    const href = match[1];
+    const slug = href.split("/").filter(Boolean).pop() || "";
+    links.push({ href, slug, tokens: new Set(nameTokens(slug)) });
+  }
+  return links;
+}
+
+function matchOfficialProfile(links, riderName) {
+  const wanted = nameTokens(riderName);
+  if (!wanted.length) return null;
+
+  let best = null;
+  for (const link of links) {
+    const overlap = wanted.filter(token => link.tokens.has(token)).length;
+    if (overlap < 2 && wanted.length > 1) continue;
+    const firstNameBonus = link.tokens.has(wanted[wanted.length - 1]) ? 2 : 0;
+    const score = overlap * 10 + firstNameBonus - Math.abs(link.tokens.size - wanted.length);
+    if (!best || score > best.score) best = { link, score, overlap };
+  }
+  return best?.link || null;
+}
+
+async function fetchOfficialRiderProfiles(riders) {
   console.log(`\nFetching official La Vuelta rider directory...\n${VUELTA_RIDERS_URL}`);
   const response = await fetch(VUELTA_RIDERS_URL, {
     headers: { accept: "text/html", "user-agent": "Mozilla/5.0 Vuelta-Fantasy/1.0" }
   });
   if (!response.ok) throw new Error(`La Vuelta rider directory returned HTTP ${response.status}`);
   const html = await response.text();
+  const links = extractOfficialRiderLinks(html);
   const profiles = new Map();
 
-  for (const bib of bibs) {
-    const escapedBib = String(bib).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const pattern = new RegExp(`href=["'](\\/en\\/rider\\/${escapedBib}\\/[^"']+)["']`, "i");
-    const match = html.match(pattern);
-    if (!match?.[1]) continue;
-
-    const url = `${VUELTA_BASE}${match[1]}`;
-    let image = null;
-    try {
-      const profileResponse = await fetch(url, {
-        headers: { accept: "text/html", "user-agent": "Mozilla/5.0 Vuelta-Fantasy/1.0" }
-      });
-      if (profileResponse.ok) image = firstOfficialImage(await profileResponse.text(), bib);
-    } catch (error) {
-      console.warn(`Could not fetch profile image for bib ${bib}: ${error.message}`);
+  for (const rider of riders) {
+    const profileLink = matchOfficialProfile(links, rider.name);
+    if (!profileLink) {
+      console.warn(`Could not match official rider profile for ${rider.name}`);
+      continue;
     }
 
-    profiles.set(Number(bib), { url, image });
+    const requestedUrl = `${VUELTA_BASE}${profileLink.href}`;
+    let url = requestedUrl;
+    let image = null;
+    try {
+      const profileResponse = await fetch(requestedUrl, {
+        headers: { accept: "text/html", "user-agent": "Mozilla/5.0 Vuelta-Fantasy/1.0" }
+      });
+      if (profileResponse.ok) {
+        // Use the final canonical URL after any redirect. This is important because
+        // RaceCenter bibs and official La Vuelta bibs are not guaranteed to match.
+        url = profileResponse.url || requestedUrl;
+        image = firstOfficialImage(await profileResponse.text());
+      }
+    } catch (error) {
+      console.warn(`Could not fetch profile for ${rider.name}: ${error.message}`);
+    }
+
+    profiles.set(rider.key, { url, image });
   }
 
   const images = [...profiles.values()].filter(profile => profile.image).length;
-  console.log(`✓ Matched ${profiles.size}/${bibs.length} official rider profiles`);
-  console.log(`✓ Matched ${images}/${bibs.length} official rider photos`);
+  console.log(`✓ Matched ${profiles.size}/${riders.length} official rider profiles`);
+  console.log(`✓ Matched ${images}/${riders.length} official rider photos`);
   return profiles;
 }
 
@@ -110,19 +148,23 @@ async function importStage(stage, db) {
   const positions = new Set(results.map(r => r.position));
   if (results.length !== 30 || positions.size !== 30) return { imported: false, reason: `Expected 30 unique positions, found ${results.length}/${positions.size}.` };
 
-  const profiles = await fetchOfficialRiderProfiles(results.map(r => r.bib));
-  const riders = results.map(result => {
+  const ridersWithoutProfiles = results.map(result => {
     const rider = ridersByBib.get(result.bib);
     if (!rider) throw new Error(`Could not resolve rider for bib ${result.bib} at position ${result.position}.`);
-    const profile = profiles.get(rider.bib) || {};
+    return { ...rider, position: result.position };
+  });
+
+  const profiles = await fetchOfficialRiderProfiles(ridersWithoutProfiles);
+  const riders = ridersWithoutProfiles.map(rider => {
+    const profile = profiles.get(rider.key) || {};
     return {
-      position: result.position,
+      position: rider.position,
       bib: rider.bib,
       name: rider.name,
       key: rider.key,
       url: profile.url || null,
       image: profile.image || null,
-      points: POINTS[result.position - 1]
+      points: POINTS[rider.position - 1]
     };
   });
 
