@@ -67,18 +67,8 @@ async function main() {
 
   const db = createClient(supabaseUrl, serviceRoleKey);
 
-  // ------------------------------------------------------------
-  // 1. Download official La Vuelta Race Center classification
-  // ------------------------------------------------------------
-
-  const rankingUrl =
-    `${RACE_CENTER_BASE}/rankingType-${RACE_YEAR}-${stage}`;
-
-  const rankingPayload = await fetchJson(
-    rankingUrl,
-    `RaceCenter Stage ${stage} classification`
-  );
-
+  const rankingUrl = `${RACE_CENTER_BASE}/rankingType-${RACE_YEAR}-${stage}`;
+  const rankingPayload = await fetchJson(rankingUrl, `RaceCenter Stage ${stage} classification`);
   const rankingData = asArray(rankingPayload);
 
   if (rankingData.length === 0) {
@@ -86,10 +76,6 @@ async function main() {
   }
 
   console.log(`✓ Received ${rankingData.length} ranking records`);
-
-  // ------------------------------------------------------------
-  // 2. Find the final individual stage classification
-  // ------------------------------------------------------------
 
   const finalClassifications = rankingData
     .filter((item) => {
@@ -113,20 +99,11 @@ async function main() {
   const finalRankings = asArray(finalClassification);
 
   console.log(
-    `✓ Final classification found: checkpoint ${
-      finalClassification.checkpoint ?? finalClassification.checkPoint ?? "unknown"
-    }`
+    `✓ Final classification found: checkpoint ${finalClassification.checkpoint ?? finalClassification.checkPoint ?? "unknown"}`
   );
-
-  // ------------------------------------------------------------
-  // 3. Download official rider/competitor data
-  // ------------------------------------------------------------
 
   const competitorsUrl = `${RACE_CENTER_BASE}/allCompetitors-${RACE_YEAR}`;
-  const competitorsPayload = await fetchJson(
-    competitorsUrl,
-    "RaceCenter competitor data"
-  );
+  const competitorsPayload = await fetchJson(competitorsUrl, "RaceCenter competitor data");
   const competitors = asArray(competitorsPayload);
 
   if (competitors.length === 0) {
@@ -135,18 +112,13 @@ async function main() {
 
   console.log(`✓ Received ${competitors.length} competitors`);
 
-  // ------------------------------------------------------------
-  // 4. Create bib → rider lookup
-  // ------------------------------------------------------------
-
   const ridersByBib = new Map();
 
   for (const competitor of competitors) {
     if (competitor.bib == null) continue;
 
-    // Race Center exposes surname/firstname separately. Keep the
-    // public rider name in FIRSTNAME LASTNAME order for fantasy picks.
-    const name = [competitor.firstname, competitor.lastname]
+    // Store the canonical fantasy/database name as LAST NAME FIRST NAME.
+    const name = [competitor.lastname, competitor.firstname]
       .filter(Boolean)
       .join(" ")
       .replace(/\s+/g, " ")
@@ -160,10 +132,6 @@ async function main() {
       bib: Number(competitor.bib)
     });
   }
-
-  // ------------------------------------------------------------
-  // 5. Extract exactly positions 1–30
-  // ------------------------------------------------------------
 
   const results = finalRankings
     .map((ranking) => ({
@@ -189,10 +157,6 @@ async function main() {
     process.exit(1);
   }
 
-  // ------------------------------------------------------------
-  // 6. Resolve every rider by bib before touching Supabase
-  // ------------------------------------------------------------
-
   const riders = [];
 
   for (const result of results) {
@@ -212,10 +176,6 @@ async function main() {
       points: POINTS[result.position - 1]
     });
   }
-
-  // ------------------------------------------------------------
-  // 7. Final validation
-  // ------------------------------------------------------------
 
   const uniqueBibs = new Set(riders.map((rider) => rider.bib));
 
@@ -237,10 +197,6 @@ async function main() {
 
   console.log("\n✓ Exactly 30 unique riders successfully resolved");
 
-  // ------------------------------------------------------------
-  // 8. Find the existing stage in Supabase
-  // ------------------------------------------------------------
-
   console.log("\nConnecting to Supabase...");
 
   const { data: stageRow, error: stageError } = await db
@@ -250,16 +206,10 @@ async function main() {
     .single();
 
   if (stageError) {
-    throw new Error(
-      `Could not find Stage ${stage} in Supabase: ${stageError.message}`
-    );
+    throw new Error(`Could not find Stage ${stage} in Supabase: ${stageError.message}`);
   }
 
   console.log(`✓ Found Supabase Stage ${stage}`);
-
-  // ------------------------------------------------------------
-  // 9. Replace existing results only AFTER all validation passes
-  // ------------------------------------------------------------
 
   console.log("Removing previous results for this stage...");
 
@@ -271,10 +221,6 @@ async function main() {
   if (clearError) {
     throw new Error(`Could not clear existing results: ${clearError.message}`);
   }
-
-  // ------------------------------------------------------------
-  // 10. Insert new results
-  // ------------------------------------------------------------
 
   const rows = riders.map((rider) => ({
     stage_id: stageRow.id,
@@ -294,14 +240,9 @@ async function main() {
 
   console.log("✓ 30 results inserted");
 
-  // ------------------------------------------------------------
-  // 11. Mark stage as published
-  // ------------------------------------------------------------
-
   const { error: updateError } = await db
     .from("stages")
     .update({
-      // Historical column name retained for schema compatibility.
       pcs_url: `https://racecenter.lavuelta.es/en/rankings/${stage}`,
       status: "published",
       imported_at: new Date().toISOString()
@@ -309,9 +250,7 @@ async function main() {
     .eq("id", stageRow.id);
 
   if (updateError) {
-    throw new Error(
-      `Results inserted, but stage update failed: ${updateError.message}`
-    );
+    throw new Error(`Results inserted, but stage update failed: ${updateError.message}`);
   }
 
   console.log("✓ Stage marked as published");
