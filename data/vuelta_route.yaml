@@ -38,12 +38,6 @@ stages:
     finish: "Roquetes. Terres de l'Ebre"
     distance: "173.3 km"
     official_url: "https://www.lavuelta.es/en/stage-5"
-    winner:
-      name: "James Matthew BRENNAN"
-      display_name: "J. BRENNAN"
-      team: "#33 | TEAM VISMA | LEASE A BIKE"
-      url: "https://www.lavuelta.es/en/rider/33/team-visma-lease-a-bike/james-matthew-brennan"
-      image: "https://img.aso.fr/core_app/img-cycling-vue-png/33/28097/0:0,660:1000-300-0-70/1d7d8"
 
   6:
     date: "2026-08-27"
