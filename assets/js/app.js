@@ -83,10 +83,15 @@
     return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 400"><rect width="300" height="400" fill="#d9ff43"/><text x="150" y="220" text-anchor="middle" font-family="Arial,sans-serif" font-size="88" font-weight="900" fill="#11231f">${text}</text></svg>`)}`;
   };
 
+  // The winner card is intentionally driven by the same official published
+  // stage-result rows that came from La Vuelta's Race Center API. Route YAML
+  // is NOT used to decide who won, so every new published stage works without
+  // manually adding a winner to vuelta_route.yaml.
   const showWinner = (winner) => {
     if (!winner?.name) return;
     const card = $('[data-stage-winner]');
     const image = $('[data-winner-image]');
+    if (!card || !image) return;
     image.src = winner.image || winnerFallbackImage(winner.name);
     image.alt = winner.name;
     $('[data-winner-name]').textContent = winner.display_name || winner.name;
@@ -120,6 +125,8 @@
     const stage = stages[0];
     const routeStage = route.stages?.[stage.stage_number];
 
+    // Location card continues to use the route data, which mirrors the
+    // official La Vuelta stage information.
     if (routeStage) {
       $('[data-latest-eyebrow]').textContent = `Stage ${stage.stage_number}`;
       $('[data-latest-title]').textContent = `${routeStage.start} → ${routeStage.finish}`;
@@ -128,8 +135,6 @@
       link.href = routeStage.official_url || stage.pcs_url || '#';
       link.textContent = 'View stage ↗';
       link.hidden = false;
-
-      if (routeStage.winner) showWinner(routeStage.winner);
     } else {
       $('[data-latest-title]').textContent = `Stage ${stage.stage_number} · ${stage.stage_name || 'Official result'}`;
       $('[data-latest-meta]').textContent = `${stage.result_date || 'Results published'} · top 30 scored`;
@@ -138,13 +143,19 @@
       link.hidden = !stage.pcs_url;
     }
 
-    // Always derive the latest winner from the official published top-30.
-    // Route YAML may contain richer image/team data, but the result itself is authoritative.
-    const latestWinner = results.find(r => r.stage_id === stage.id && r.finish_position === 1);
+    // UNIVERSAL STAGE WINNER:
+    // position 1 from the latest published official classification is always
+    // the winner. No per-stage winner entry is required in route YAML.
+    const latestWinner = results.find(
+      r => Number(r.stage_id) === Number(stage.id) && Number(r.finish_position) === 1
+    );
+
     if (latestWinner) {
       const routeWinner = routeStage?.winner;
       showWinner({
         name: latestWinner.rider_name,
+        // Keep a manually supplied presentation name/image only as optional
+        // decoration. The identity and winner status always come from results.
         display_name: routeWinner?.display_name || latestWinner.rider_name,
         team: routeWinner?.team || '',
         image: routeWinner?.image || '',
@@ -159,8 +170,6 @@
       get(`public_predictions?select=participant_name,rider_names,stage_id&stage_id=eq.${stage.id}&order=participant_name.asc`)
     ]);
 
-    // Render every participant returned by the published stage score view,
-    // including zero-point players, so the daily table is never blank.
     if (scores.length) {
       $('[data-daily]').innerHTML = scores.map((x, i) => `
         <tr><td class="rank">${i + 1}</td><td>${participantMarkup(x.participant_name)}</td><td>${riderNames(x)}</td><td class="number"><strong>${x.points}</strong></td></tr>
