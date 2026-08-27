@@ -8,6 +8,9 @@ const POINTS = [
   10, 9, 8, 7, 6, 5, 4, 3, 2, 1
 ];
 
+const RACE_YEAR = 2026;
+const RACE_CENTER_BASE = "https://racecenter.lavuelta.es/api";
+
 function riderKey(value) {
   return value
     .normalize("NFD")
@@ -17,12 +20,40 @@ function riderKey(value) {
     .replace(/^-|-$/g, "");
 }
 
+function asArray(value) {
+  if (Array.isArray(value)) return value;
+  if (Array.isArray(value?.rankings)) return value.rankings;
+  if (Array.isArray(value?.data)) return value.data;
+  if (Array.isArray(value?.results)) return value.results;
+  return [];
+}
+
+async function fetchJson(url, label) {
+  console.log(`\nFetching ${label}...`);
+  console.log(url);
+
+  const response = await fetch(url, {
+    headers: {
+      accept: "application/json",
+      "user-agent": "Mozilla/5.0 Vuelta-Fantasy/1.0"
+    }
+  });
+
+  if (!response.ok) {
+    throw new Error(`${label} returned HTTP ${response.status}`);
+  }
+
+  const data = await response.json();
+  console.log("✓ JSON received");
+  return data;
+}
+
 async function main() {
   const stage = Number(process.argv[2]);
 
   if (!Number.isInteger(stage) || stage < 1 || stage > 21) {
     console.error("Usage: node ingest-pcs.js <stage>");
-    console.error("Example: node ingest-pcs.js 4");
+    console.error("Example: node ingest-pcs.js 6");
     process.exit(1);
   }
 
@@ -30,33 +61,29 @@ async function main() {
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
   if (!supabaseUrl || !serviceRoleKey) {
-    console.error(
-      "Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY in .env"
-    );
+    console.error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY in .env");
     process.exit(1);
   }
 
   const db = createClient(supabaseUrl, serviceRoleKey);
 
   // ------------------------------------------------------------
-  // 1. Download RaceCenter classification
+  // 1. Download official La Vuelta Race Center classification
   // ------------------------------------------------------------
 
   const rankingUrl =
-    `https://racecenter.lavuelta.es/api/rankingType-2026-${stage}`;
+    `${RACE_CENTER_BASE}/rankingType-${RACE_YEAR}-${stage}`;
 
-  console.log(`\nFetching RaceCenter Stage ${stage}...`);
-  console.log(rankingUrl);
+  const rankingPayload = await fetchJson(
+    rankingUrl,
+    `RaceCenter Stage ${stage} classification`
+  );
 
-  const rankingResponse = await fetch(rankingUrl);
+  const rankingData = asArray(rankingPayload);
 
-  if (!rankingResponse.ok) {
-    throw new Error(
-      `RaceCenter returned HTTP ${rankingResponse.status}`
-    );
+  if (rankingData.length === 0) {
+    throw new Error("RaceCenter returned no ranking records.");
   }
-
-  const rankingData = await rankingResponse.json();
 
   console.log(`✓ Received ${rankingData.length} ranking records`);
 
@@ -65,52 +92,46 @@ async function main() {
   // ------------------------------------------------------------
 
   const finalClassifications = rankingData
-    .filter(
-      (item) =>
-        item.type === "ite" &&
-        Array.isArray(item.rankings) &&
-        item.rankings.length >= 30
-    )
+    .filter((item) => {
+      const type = String(item.type ?? "").toLowerCase();
+      const rankings = asArray(item);
+      return type === "ite" && rankings.length >= 30;
+    })
     .sort((a, b) => {
-      const checkpointA = Number(a.checkpoint || 0);
-      const checkpointB = Number(b.checkpoint || 0);
+      const checkpointA = Number(a.checkpoint ?? a.checkPoint ?? 0);
+      const checkpointB = Number(b.checkpoint ?? b.checkPoint ?? 0);
       return checkpointB - checkpointA;
     });
 
   if (finalClassifications.length === 0) {
-    console.error(
-      "\nNo final stage classification with at least 30 riders was found."
-    );
-    console.error(
-      "The stage may not be finished/published yet."
-    );
+    console.error("\nNo final individual classification with at least 30 riders was found.");
+    console.error("The stage may not be finished/published yet.");
     process.exit(1);
   }
 
   const finalClassification = finalClassifications[0];
+  const finalRankings = asArray(finalClassification);
 
   console.log(
-    `✓ Final classification found: checkpoint ${finalClassification.checkpoint}`
+    `✓ Final classification found: checkpoint ${
+      finalClassification.checkpoint ?? finalClassification.checkPoint ?? "unknown"
+    }`
   );
 
   // ------------------------------------------------------------
-  // 3. Download rider/competitor data
+  // 3. Download official rider/competitor data
   // ------------------------------------------------------------
 
-  const competitorsUrl =
-    "https://racecenter.lavuelta.es/api/allCompetitors-2026";
+  const competitorsUrl = `${RACE_CENTER_BASE}/allCompetitors-${RACE_YEAR}`;
+  const competitorsPayload = await fetchJson(
+    competitorsUrl,
+    "RaceCenter competitor data"
+  );
+  const competitors = asArray(competitorsPayload);
 
-  console.log("\nFetching rider data...");
-
-  const competitorsResponse = await fetch(competitorsUrl);
-
-  if (!competitorsResponse.ok) {
-    throw new Error(
-      `RaceCenter competitors returned HTTP ${competitorsResponse.status}`
-    );
+  if (competitors.length === 0) {
+    throw new Error("RaceCenter returned no competitor records.");
   }
-
-  const competitors = await competitorsResponse.json();
 
   console.log(`✓ Received ${competitors.length} competitors`);
 
@@ -123,13 +144,12 @@ async function main() {
   for (const competitor of competitors) {
     if (competitor.bib == null) continue;
 
-    
-const name = [
-  competitor.lastname,
-  competitor.firstname
-  ]
+    // Race Center exposes surname/firstname separately. Keep the
+    // public rider name in FIRSTNAME LASTNAME order for fantasy picks.
+    const name = [competitor.firstname, competitor.lastname]
       .filter(Boolean)
       .join(" ")
+      .replace(/\s+/g, " ")
       .trim();
 
     if (!name) continue;
@@ -142,10 +162,15 @@ const name = [
   }
 
   // ------------------------------------------------------------
-  // 5. Extract positions 1–30
+  // 5. Extract exactly positions 1–30
   // ------------------------------------------------------------
 
-  const results = finalClassification.rankings
+  const results = finalRankings
+    .map((ranking) => ({
+      ...ranking,
+      position: Number(ranking.position ?? ranking.rank ?? ranking.place),
+      bib: Number(ranking.bib ?? ranking.bibNumber ?? ranking.competitorBib)
+    }))
     .filter(
       (ranking) =>
         Number.isInteger(ranking.position) &&
@@ -154,28 +179,29 @@ const name = [
     )
     .sort((a, b) => a.position - b.position);
 
-  if (results.length < 30) {
+  const uniquePositions = new Set(results.map((result) => result.position));
+
+  if (results.length !== 30 || uniquePositions.size !== 30) {
     console.error(
-      `\nOnly found ${results.length} positions in the final classification.`
+      `\nExpected exactly 30 unique positions, found ${results.length} rows / ${uniquePositions.size} unique positions.`
     );
     console.error("Nothing will be written to Supabase.");
     process.exit(1);
   }
 
   // ------------------------------------------------------------
-  // 6. Resolve riders by bib
+  // 6. Resolve every rider by bib before touching Supabase
   // ------------------------------------------------------------
 
   const riders = [];
 
   for (const result of results) {
-    const rider = ridersByBib.get(Number(result.bib));
+    const rider = ridersByBib.get(result.bib);
 
     if (!rider) {
-      console.error(
-        `Could not find rider for bib ${result.bib} at position ${result.position}`
+      throw new Error(
+        `Could not resolve rider for bib ${result.bib} at position ${result.position}. Nothing will be written.`
       );
-      process.exit(1);
     }
 
     riders.push({
@@ -188,8 +214,14 @@ const name = [
   }
 
   // ------------------------------------------------------------
-  // 7. Display results BEFORE touching Supabase
+  // 7. Final validation
   // ------------------------------------------------------------
+
+  const uniqueBibs = new Set(riders.map((rider) => rider.bib));
+
+  if (uniqueBibs.size !== 30) {
+    throw new Error("The top 30 contains duplicate rider bibs. Nothing will be written.");
+  }
 
   console.log("\nFINAL STAGE RESULTS");
   console.log("-------------------");
@@ -197,16 +229,16 @@ const name = [
   for (const rider of riders) {
     console.log(
       `${String(rider.position).padStart(2, " ")}. ` +
-      `${rider.name.padEnd(30)} ` +
+      `${rider.name.padEnd(32)} ` +
       `bib ${String(rider.bib).padStart(3)} ` +
       `${rider.points} pts`
     );
   }
 
-  console.log("\n✓ 30 riders successfully resolved");
+  console.log("\n✓ Exactly 30 unique riders successfully resolved");
 
   // ------------------------------------------------------------
-  // 8. Find the existing stage
+  // 8. Find the existing stage in Supabase
   // ------------------------------------------------------------
 
   console.log("\nConnecting to Supabase...");
@@ -226,10 +258,10 @@ const name = [
   console.log(`✓ Found Supabase Stage ${stage}`);
 
   // ------------------------------------------------------------
-  // 9. Delete existing results for this stage
+  // 9. Replace existing results only AFTER all validation passes
   // ------------------------------------------------------------
 
-  console.log("Removing previous results...");
+  console.log("Removing previous results for this stage...");
 
   const { error: clearError } = await db
     .from("stage_results")
@@ -237,9 +269,7 @@ const name = [
     .eq("stage_id", stageRow.id);
 
   if (clearError) {
-    throw new Error(
-      `Could not clear existing results: ${clearError.message}`
-    );
+    throw new Error(`Could not clear existing results: ${clearError.message}`);
   }
 
   // ------------------------------------------------------------
@@ -259,9 +289,7 @@ const name = [
     .insert(rows);
 
   if (insertError) {
-    throw new Error(
-      `Could not insert stage results: ${insertError.message}`
-    );
+    throw new Error(`Could not insert stage results: ${insertError.message}`);
   }
 
   console.log("✓ 30 results inserted");
@@ -273,8 +301,8 @@ const name = [
   const { error: updateError } = await db
     .from("stages")
     .update({
-      pcs_url:
-        `https://racecenter.lavuelta.es/en/rankings/${stage}`,
+      // Historical column name retained for schema compatibility.
+      pcs_url: `https://racecenter.lavuelta.es/en/rankings/${stage}`,
       status: "published",
       imported_at: new Date().toISOString()
     })
@@ -292,9 +320,8 @@ const name = [
   console.log(`✓ STAGE ${stage} IMPORT COMPLETE`);
   console.log("================================");
   console.log(`✓ ${riders.length} riders`);
+  console.log("✓ Official Race Center source used");
   console.log("✓ Results written to Supabase");
-  console.log("✓ Previous stage results replaced");
-  console.log("");
 }
 
 main().catch((error) => {
